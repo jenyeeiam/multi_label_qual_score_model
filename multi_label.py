@@ -1,5 +1,5 @@
 from transformers import AdamW, get_linear_schedule_with_warmup, AutoTokenizer
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import torch
 
 from multi_label_class import MultiTaskBertModel  # Import the model class
@@ -10,41 +10,52 @@ from datasets import load_dataset, Dataset
 import pandas as pd
 import json
 
-dataset_path = './complete_data.json'
-train_dataset = load_dataset('json', data_files=dataset_path)
+dataset_path = './data/complete_data_with_sentiment_word_count.json'
+raw_dataset = load_dataset('json', data_files=dataset_path)['train']
+data = [dict(text=entry['text'], evidence=int(entry['evidence']), suggestion=int(entry['suggestion']),
+             connection=int(entry['connection']), sentiment=float(entry['sentiment']),
+             word_count=int(entry['word_count'])) for entry in raw_dataset]
 
-converted_data = []
-for feedback in train_dataset['train']:
-  new_feedback = {}
-  new_feedback['text'] = feedback['text']
-  new_feedback['evidence'] = int(feedback['evidence'])
-  new_feedback['suggestion'] = int(feedback['suggestion'])
-  new_feedback['connection'] = int(feedback['connection'])
-  converted_data.append(new_feedback)
+# Convert to a Pandas DataFrame and then to a Hugging Face Dataset
+df = pd.DataFrame(data)
+dataset = Dataset.from_pandas(df)
 
+# Tokenization
+tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
+# Tokenization
 def tokenize_function(examples):
-    return tokenizer(examples["text"], padding="max_length", truncation=True, return_tensors="pt")
+    return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=512)
+
+# Apply tokenization to the entire dataset
+tokenized_dataset = dataset.map(tokenize_function, batched=True)
+# Now, convert the entire tokenized dataset to PyTorch tensors
+tokenized_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'evidence', 'suggestion', 'connection', 'sentiment', 'word_count'])
+# Then, you can split the dataset
+train_size = int(0.7 * len(tokenized_dataset))
+val_size = int(0.15 * len(tokenized_dataset))
+test_size = len(tokenized_dataset) - train_size - val_size
+# Use the split indices to create subsets
+train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(tokenized_dataset, [train_size, val_size, test_size])
 
 def collate_fn(batch):
-    input_ids = torch.tensor([item['input_ids'] for item in batch])
-    attention_mask = torch.tensor([item['attention_mask'] for item in batch])
-    labels_evidence = torch.tensor([item['evidence'] for item in batch])
-    labels_suggestion = torch.tensor([item['suggestion'] for item in batch])
-    labels_connection = torch.tensor([item['connection'] for item in batch])
+    # Collate the batch
+    batch_dict = {key: [] for key in ['input_ids', 'attention_mask', 'evidence', 'suggestion', 'connection', 'sentiment', 'word_count']}
+    for item in batch:
+        for key in batch_dict.keys():
+            batch_dict[key].append(item[key])
+    
+    # Convert lists to tensors (if not already tensors)
+    for key in batch_dict:
+        batch_dict[key] = torch.stack(batch_dict[key])
 
-    return {
-        'input_ids': input_ids.to(device),
-        'attention_mask': attention_mask.to(device),
-        'labels_evidence': labels_evidence.to(device),
-        'labels_suggestion': labels_suggestion.to(device),
-        'labels_connection': labels_connection.to(device),
-    }
+    # Move the entire batch to the device in one go (just before returning)
+    return {key: value.to(device) for key, value in batch_dict.items()}
 
-# Tokenize the dataset
-train_dataset['train'] = Dataset.from_pandas(pd.DataFrame(data=converted_data))
-tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
-tokenized_datasets = train_dataset['train'].map(tokenize_function, batched=True)
-train_dataloader = DataLoader(tokenized_datasets, shuffle=True, batch_size=16, collate_fn=collate_fn)
+
+# Create data loaders
+train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=16, collate_fn=collate_fn)
+val_dataloader = DataLoader(val_dataset, batch_size=16, collate_fn=collate_fn)
+test_dataloader = DataLoader(test_dataset, batch_size=16, collate_fn=collate_fn)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -57,43 +68,135 @@ optimizer = AdamW(model.parameters(), lr=5e-5)
 
 NUM_EPOCHS = 3
 
+# Calculate the total number of training steps
+total_steps = len(train_dataloader) * NUM_EPOCHS
+# Initialize the scheduler, 10% of total steps for warm-up
+scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*total_steps, num_training_steps=total_steps)
+
+# Define loss functions for each task
+loss_functions = {
+    'evidence': nn.CrossEntropyLoss(),
+    'suggestion': nn.CrossEntropyLoss(),
+    'connection': nn.CrossEntropyLoss(),
+}
+print("Starting training...")
 for epoch in range(NUM_EPOCHS):
+    print(f"Epoch {epoch}")
     model.train()
-    total_loss = 0
+    total_train_loss = 0  # Accumulate loss over all batches for the epoch
     for batch in train_dataloader:
-        # Zero gradients at the start
-        optimizer.zero_grad()
+        optimizer.zero_grad()  # Zero gradients at the start
+
         # Unpack the batch and send to device
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
-        labels_evidence = batch['labels_evidence'].to(device)
-        labels_suggestion = batch['labels_suggestion'].to(device)
-        labels_connection = batch['labels_connection'].to(device)
+        evidence = batch['evidence'].to(device)
+        suggestion = batch['suggestion'].to(device)
+        connection = batch['connection'].to(device)
+        sentiment = batch['sentiment'].to(device)
+        word_count = batch['word_count'].to(device)
 
         # Forward pass
-        outputs = model(input_ids, attention_mask=attention_mask)
-        logits_evidence, logits_suggestion, logits_connection = outputs
+        outputs = model(input_ids, attention_mask=attention_mask, sentiment=sentiment, word_count=word_count)
+        
+        # Calculate and aggregate loss for each task
+        total_loss = 0
+        for task, logits_task in outputs.items():
+            labels_task = batch[task].to(device)
+            loss = loss_functions[task](logits_task.view(-1, logits_task.size(-1)), labels_task.view(-1))
+            total_loss += loss
+
+        total_loss.backward()  # Backpropagation
+        optimizer.step()
+        # Step the learning rate scheduler
+        scheduler.step()
+        total_train_loss += total_loss.item()
+
+    # Start validation phase
+    model.eval()  # Set the model to evaluation mode
+    total_val_loss = 0
+    with torch.no_grad():  # No need to track gradients
+        print("Validation phase")
+        for batch in val_dataloader:
+            # Unpack the batch and send to device
+            # Similar to the training phase, but without backward() and step()
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            evidence = batch['evidence'].to(device)
+            suggestion = batch['suggestion'].to(device)
+            connection = batch['connection'].to(device)
+            sentiment = batch['sentiment'].to(device)
+            word_count = batch['word_count'].to(device)
+
+            outputs = model(input_ids, attention_mask=attention_mask, sentiment=sentiment, word_count=word_count)
+
+            for task, logits_task in outputs.items():
+                labels_task = batch[task].to(device)
+                loss = loss_functions[task](logits_task.view(-1, logits_task.size(-1)), labels_task.view(-1))
+                total_val_loss += loss
+
+    
+
+    # Calculate average losses for the epoch
+    avg_train_loss = total_train_loss / len(train_dataloader)
+    avg_val_loss = total_val_loss / len(val_dataloader)
+    
+
+    print(f"Epoch {epoch}: Average Training Loss = {avg_train_loss:.4f}, Average Validation Loss = {avg_val_loss:.4f}")
+
+# Initialize variables to track test loss and optionally other metrics
+total_test_loss = 0
+
+# Initialize counters for correct predictions and total predictions for each task
+correct_predictions_evidence, correct_predictions_suggestion, correct_predictions_connection = 0, 0, 0
+total_predictions_evidence, total_predictions_suggestion, total_predictions_connection = 0, 0, 0
+model.eval()  # Set the model to evaluation mode
+print("Starting testing...")
+with torch.no_grad():
+    for batch in test_dataloader:
+        # Unpack the batch and move to the device
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        evidence = batch['evidence'].to(device)
+        suggestion = batch['suggestion'].to(device)
+        connection = batch['connection'].to(device)
+        sentiment = batch['sentiment'].to(device)
+        word_count = batch['word_count'].to(device)
+
+        # Forward pass
+        outputs = model(input_ids, attention_mask=attention_mask, sentiment=sentiment, word_count=word_count)
 
         # Calculate loss for each task
-        loss_fct = nn.CrossEntropyLoss()
-        loss_evidence = loss_fct(logits_evidence.view(-1, 4), labels_evidence.view(-1))
-        loss_suggestion = loss_fct(logits_suggestion.view(-1, 2), labels_suggestion.view(-1))
-        loss_connection = loss_fct(logits_connection.view(-1, 2), labels_connection.view(-1))
+        for task, logits_task in outputs.items():
+            labels_task = batch[task].to(device)
+            loss = loss_functions[task](logits_task.view(-1, logits_task.size(-1)), labels_task.view(-1))
+            total_test_loss += loss.item()
 
-        # Combine losses by summing the tensors directly
-        total_loss = loss_evidence + loss_suggestion + loss_connection
+            # Calculate accuracy
+            preds = torch.argmax(logits_task, dim=1)
+            correct_predictions = (preds == labels_task).sum().item()
+            total_predictions = labels_task.size(0)
 
-        total_loss.backward()  # Correctly applies backward on a tensor
-        optimizer.step()
+            if task == 'evidence':
+                correct_predictions_evidence += correct_predictions
+                total_predictions_evidence += total_predictions
+            elif task == 'suggestion':
+                correct_predictions_suggestion += correct_predictions
+                total_predictions_suggestion += total_predictions
+            elif task == 'connection':
+                correct_predictions_connection += correct_predictions
+                total_predictions_connection += total_predictions
 
-
-    # Convert total_loss to a Python number AFTER the backward pass
-    total_loss_num = total_loss.item()
-    avg_loss = total_loss_num / len(train_dataloader)
-    print(f"Epoch {epoch}: Average total loss {avg_loss}")
-    print(f"Epoch {epoch}: Total loss {total_loss_num}")
+accuracy_evidence = correct_predictions_evidence / total_predictions_evidence
+accuracy_suggestion = correct_predictions_suggestion / total_predictions_suggestion
+accuracy_connection = correct_predictions_connection / total_predictions_connection
+avg_test_loss = total_test_loss / len(test_dataloader)
+print(f"Average Test Loss: {avg_test_loss:.4f}")
+print(f"Evidence Accuracy: {accuracy_evidence:.4f}")
+print(f"Suggestion Accuracy: {accuracy_suggestion:.4f}")
+print(f"Connection Accuracy: {accuracy_connection:.4f}")
 
 # After completing the training process, save the model's state dictionary
-model_save_path = './multi_label_qual_score_model.pth'  # Specify your save path here
+model_save_path = './sentiment_qual_score_model.pth'  # Specify your save path here
 torch.save(model.state_dict(), model_save_path)
 print(f"Model saved to {model_save_path}")
