@@ -8,7 +8,7 @@ import torch.nn as nn
 
 from datasets import load_dataset, Dataset
 import pandas as pd
-import json
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 dataset_path = './data/complete_data_with_sentiment_word_count.json'
 raw_dataset = load_dataset('json', data_files=dataset_path)['train']
@@ -30,7 +30,8 @@ def tokenize_function(examples):
 tokenized_dataset = dataset.map(tokenize_function, batched=True)
 # Now, convert the entire tokenized dataset to PyTorch tensors
 tokenized_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'evidence', 'suggestion', 'connection', 'sentiment', 'word_count'])
-# Then, you can split the dataset
+# Then split the dataset
+torch.manual_seed(42)  # For reproducibility
 train_size = int(0.7 * len(tokenized_dataset))
 val_size = int(0.15 * len(tokenized_dataset))
 test_size = len(tokenized_dataset) - train_size - val_size
@@ -150,6 +151,10 @@ total_test_loss = 0
 # Initialize counters for correct predictions and total predictions for each task
 correct_predictions_evidence, correct_predictions_suggestion, correct_predictions_connection = 0, 0, 0
 total_predictions_evidence, total_predictions_suggestion, total_predictions_connection = 0, 0, 0
+# Initialize lists for true labels and predictions
+evidence_true, suggestion_true, connection_true = [], [], []
+evidence_pred_list, suggestion_pred_list, connection_pred_list = [], [], []
+
 model.eval()  # Set the model to evaluation mode
 print("Starting testing...")
 with torch.no_grad():
@@ -178,15 +183,34 @@ with torch.no_grad():
             total_predictions = labels_task.size(0)
 
             if task == 'evidence':
+                evidence_true.extend(labels_task.cpu().numpy())
+                evidence_pred_list.extend(preds.cpu().numpy())
+                # accuracy
                 correct_predictions_evidence += correct_predictions
                 total_predictions_evidence += total_predictions
             elif task == 'suggestion':
+                suggestion_true.extend(labels_task.cpu().numpy())
+                suggestion_pred_list.extend(preds.cpu().numpy())
                 correct_predictions_suggestion += correct_predictions
                 total_predictions_suggestion += total_predictions
             elif task == 'connection':
+                connection_true.extend(labels_task.cpu().numpy())
+                connection_pred_list.extend(preds.cpu().numpy())
                 correct_predictions_connection += correct_predictions
                 total_predictions_connection += total_predictions
+# Now, calculate precision, recall, and F1 score for each task
+tasks = [
+    ("Evidence", evidence_true, evidence_pred_list),
+    ("Suggestion", suggestion_true, suggestion_pred_list),
+    ("Connection", connection_true, connection_pred_list),
+]
+for task_name, true_labels, pred_labels in tasks:
+    precision = precision_score(true_labels, pred_labels, average='macro')
+    recall = recall_score(true_labels, pred_labels, average='macro')
+    f1 = f1_score(true_labels, pred_labels, average='macro')
 
+    print(f"{task_name} - Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}")
+    
 accuracy_evidence = correct_predictions_evidence / total_predictions_evidence
 accuracy_suggestion = correct_predictions_suggestion / total_predictions_suggestion
 accuracy_connection = correct_predictions_connection / total_predictions_connection
@@ -197,6 +221,6 @@ print(f"Suggestion Accuracy: {accuracy_suggestion:.4f}")
 print(f"Connection Accuracy: {accuracy_connection:.4f}")
 
 # After completing the training process, save the model's state dictionary
-model_save_path = './sentiment_qual_score_model.pth'  # Specify your save path here
+model_save_path = './sentiment_qual_score_model2.pth'  # Specify your save path here
 torch.save(model.state_dict(), model_save_path)
 print(f"Model saved to {model_save_path}")
