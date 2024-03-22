@@ -49,10 +49,18 @@ class TestMultiTaskBertModel(unittest.TestCase):
 
         self.assertIn("evidence_acc", metrics)
         self.assertIn("evidence_f1", metrics)
+        self.assertIn("evidence_auc", metrics)
         self.assertIn("suggestion_acc", metrics)
         self.assertIn("suggestion_f1", metrics)
+        self.assertIn("suggestion_auc", metrics)
         self.assertIn("connection_acc", metrics)
         self.assertIn("connection_f1", metrics)
+        self.assertIn("connection_auc", metrics)
+
+        # Check that the AUC values are within the valid range (0.0 to 1.0)
+        self.assertTrue(0.0 <= metrics["evidence_auc"] <= 1.0)
+        self.assertTrue(0.0 <= metrics["suggestion_auc"] <= 1.0)
+        self.assertTrue(0.0 <= metrics["connection_auc"] <= 1.0)
 
 if __name__ == "__main__":
     unittest.main()
