@@ -16,24 +16,37 @@ class MultiTaskBertModel(BertPreTrainedModel):
         self.bert = BertModel(config)
 
         # Define separate classifiers for each task
-        self.evidence_classifier = nn.Linear(config.hidden_size, 4)  # For evidence score, 4 possible outputs
-        self.suggestion_classifier = nn.Linear(config.hidden_size, 2)  # For suggestion, binary output
-        self.connection_classifier = nn.Linear(config.hidden_size, 2)  # For linking, binary output
+        self.evidence_classifier = nn.Linear(
+            config.hidden_size, 4
+        )  # For evidence score, 4 possible outputs
+        self.suggestion_classifier = nn.Linear(
+            config.hidden_size, 2
+        )  # For suggestion, binary output
+        self.connection_classifier = nn.Linear(
+            config.hidden_size, 2
+        )  # For connection, binary output
 
         # Initialize weights
         self.init_weights()
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None):
-        outputs = self.bert(input_ids,
-                            attention_mask=attention_mask,
-                            token_type_ids=token_type_ids,
-                            return_dict=True)
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            return_dict=True,
+        )
 
         pooled_output = outputs.pooler_output
 
         # Apply each classifier to the pooled output
         evidence_logits = self.evidence_classifier(pooled_output)
         suggestion_logits = self.suggestion_classifier(pooled_output)
-        linking_logits = self.connection_classifier(pooled_output)
+        connection_logits = self.connection_classifier(pooled_output)
 
-        return evidence_logits, suggestion_logits, linking_logits
+        # Return a dictionary of logits
+        return {
+            "evidence": evidence_logits,
+            "suggestion": suggestion_logits,
+            "connection": connection_logits,
+        }
