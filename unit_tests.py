@@ -1,6 +1,7 @@
 import unittest
 import torch
 from multi_label_class import MultiTaskBertModel
+from data_preparation import prepare_dataset
 
 class TestMultiTaskBertModel(unittest.TestCase):
     def setUp(self):
@@ -61,6 +62,24 @@ class TestMultiTaskBertModel(unittest.TestCase):
         self.assertTrue(0.0 <= metrics["evidence_auc"] <= 1.0)
         self.assertTrue(0.0 <= metrics["suggestion_auc"] <= 1.0)
         self.assertTrue(0.0 <= metrics["connection_auc"] <= 1.0)
+
+class TestDataPreparation(unittest.TestCase):
+    def test_prepare_dataset(self):
+        train_dataloader, val_dataloader, test_dataloader = prepare_dataset('./tests/test_data.json')
+        
+        # Check that the dataloaders are not empty
+        self.assertGreater(len(train_dataloader), 0)
+        self.assertGreater(len(val_dataloader), 0)
+        self.assertGreater(len(test_dataloader), 0)
+        
+        # Check the shape of the tensors in the batch
+        for batch in train_dataloader:
+            self.assertEqual(batch["input_ids"].shape[0], 16)  # Batch size
+            self.assertEqual(batch["input_ids"].shape[1], 512)  # Max sequence length
+            self.assertEqual(batch["evidence"].shape[0], 16)
+            self.assertEqual(batch["suggestion"].shape[0], 16)
+            self.assertEqual(batch["connection"].shape[0], 16)
+            break  # Check only one batch
 
 if __name__ == "__main__":
     unittest.main()
