@@ -5,7 +5,7 @@ import torch
 from transformers import BertPreTrainedModel, BertModel
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, roc_curve, auc
 
 from datasets import load_dataset, Dataset
 import pandas as pd
@@ -65,18 +65,31 @@ class MultiTaskBertModel(BertPreTrainedModel):
 
         evidence_acc = accuracy_score(evidence_labels.cpu(), evidence_preds.cpu())
         evidence_f1 = f1_score(evidence_labels.cpu(), evidence_preds.cpu(), average="macro")
-
+        # Compute AUC for evidence task
+        evidence_auc = roc_auc_score(
+            evidence_labels.cpu(), evidence_logits.cpu(), multi_class="ovr", average="macro"
+        )
+        
         suggestion_acc = accuracy_score(suggestion_labels.cpu(), suggestion_preds.cpu())
         suggestion_f1 = f1_score(suggestion_labels.cpu(), suggestion_preds.cpu())
-
+        suggestion_auc = roc_auc_score(
+            suggestion_labels.cpu(), suggestion_logits.cpu(), average="binary"
+        )
+        
         connection_acc = accuracy_score(connection_labels.cpu(), connection_preds.cpu())
         connection_f1 = f1_score(connection_labels.cpu(), connection_preds.cpu())
+        connection_auc = roc_auc_score(
+            connection_labels.cpu(), connection_logits.cpu(), average="binary"
+        )
 
         return {
             "evidence_acc": evidence_acc,
             "evidence_f1": evidence_f1,
+            "evidence_auc": evidence_auc,
             "suggestion_acc": suggestion_acc,
             "suggestion_f1": suggestion_f1,
+            "suggestion_auc": suggestion_auc,
             "connection_acc": connection_acc,
             "connection_f1": connection_f1,
+            "connection_auc": connection_auc,
         }
