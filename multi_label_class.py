@@ -5,7 +5,7 @@ import numpy as np
 from transformers import BertPreTrainedModel, BertModel
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import accuracy_score, f1_score, roc_curve, auc, roc_auc_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 
 class MultiTaskBertModel(BertPreTrainedModel):
