@@ -1,3 +1,5 @@
+"""This script prepares the dataset for training the refactored multi-label classification model."""
+
 from datasets import load_dataset, Dataset
 import pandas as pd
 from torch.utils.data import DataLoader

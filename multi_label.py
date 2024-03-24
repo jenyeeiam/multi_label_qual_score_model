@@ -1,3 +1,5 @@
+"""This script was the brute force method to training and evaluation without refactoring out the common code into functions."""
+
 from transformers import AdamW, get_linear_schedule_with_warmup, AutoTokenizer
 from torch.utils.data import DataLoader
 import torch

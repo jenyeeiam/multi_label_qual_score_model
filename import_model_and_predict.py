@@ -1,8 +1,12 @@
+"""This script loads an already trained model and evaluates it on the test split of the dataset."""
+
 import torch
 from multi_label_class import MultiTaskBertModel  # Import the model class
 from transformers import BertConfig
-from data_preparation import prepare_dataset  # Import the function to prepare the dataset
-from transformers import AutoTokenizer
+from data_preparation import (
+    prepare_dataset,
+)  # Import the function to prepare the dataset
+
 
 def initialize_model(device, model_path):
     # Initialize the model
@@ -12,6 +16,7 @@ def initialize_model(device, model_path):
     model.eval()
     model.to(device)
     return model
+
 
 def get_metrics_on_test_split(device, model, test_dataloader):
     metrics = {
@@ -35,7 +40,9 @@ def get_metrics_on_test_split(device, model, test_dataloader):
             outputs = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
-                token_type_ids=batch.get("token_type_ids", None),  # Optional, depending on your model's requirements
+                token_type_ids=batch.get(
+                    "token_type_ids", None
+                ),  # Optional, depending on your model's requirements
                 evidence_labels=batch["evidence"],
                 suggestion_labels=batch["suggestion"],
                 connection_labels=batch["connection"],
@@ -45,7 +52,7 @@ def get_metrics_on_test_split(device, model, test_dataloader):
             batch_metrics = model.compute_metrics(
                 outputs, batch["evidence"], batch["suggestion"], batch["connection"]
             )
-            
+
             for key in metrics.keys():
                 metrics[key] += batch_metrics[key]
 
@@ -56,13 +63,14 @@ def get_metrics_on_test_split(device, model, test_dataloader):
     for key in metrics.keys():
         metrics[key] /= num_batches
 
+
 if __name__ == "__main__":
     # This path should be to your dataset file
     dataset_path = "./data/complete_data.json"
     # Assuming prepare_dataset returns DataLoader objects
     _, _, test_dataloader = prepare_dataset(dataset_path)
 
-    model_path = './trained_models/multi_task_model.pth'
+    model_path = "./trained_models/multi_task_model.pth"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     loaded_model = initialize_model(device, model_path)
 

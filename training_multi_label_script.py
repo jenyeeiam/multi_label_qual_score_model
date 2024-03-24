@@ -1,4 +1,5 @@
-# training_script.py
+"""This script trains the refactored multi-label classification model on the dataset and evaluates it """
+
 from multi_label_class import MultiTaskBertModel
 from data_preparation import prepare_dataset
 import torch
