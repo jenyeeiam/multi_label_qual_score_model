@@ -104,11 +104,11 @@ if __name__ == "__main__":
     model = initialize_model(device)
     # Load the dataset
     train_dataloader, val_dataloader, test_dataloader = prepare_dataset(
-        "./data/test_data.json"
+        "./data/complete_data.json"
     )
     # Prepare optimizer and schedule (linear warm-up and decay)
     optimizer = AdamW(model.parameters(), lr=5e-5)
-    NUM_EPOCHS = 1
+    NUM_EPOCHS = 3
     total_steps = len(train_dataloader) * NUM_EPOCHS
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=0.1 * total_steps, num_training_steps=total_steps
@@ -122,11 +122,11 @@ if __name__ == "__main__":
         optimizer,
         scheduler,
     )
-    loss, metrics = evaluate_model(trained_model, test_dataloader)
-    print(f"Test Loss: {loss}")
-    print(f"Test Metrics: {metrics}")
+    # loss, metrics = evaluate_model(trained_model, test_dataloader)
+    # print(f"Test Loss: {loss}")
+    # print(f"Test Metrics: {metrics}")
 
     # Save the model
     model_save_path = "./trained_models/refactored_model.pth"
-    torch.save(model.state_dict(), model_save_path)
+    torch.save(trained_model.state_dict(), model_save_path)
     print(f"Model saved to {model_save_path}")

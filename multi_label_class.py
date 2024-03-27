@@ -58,8 +58,6 @@ class MultiTaskBertModel(BertPreTrainedModel):
             suggestion_labels = suggestion_labels.float().unsqueeze(
                 1
             )  # Add singleton dimension for logits
-            print(f"suggestion_logits.shape = {suggestion_logits.shape}")
-            print(f"suggestion_labels.shape = {suggestion_labels.shape}")
             suggestion_loss = F.binary_cross_entropy_with_logits(
                 suggestion_logits, suggestion_labels
             )
